@@ -1,0 +1,191 @@
+---
+# =============================================================================
+# FULL VALIDATION WORKFLOW — Standalone orchestration playbook
+# =============================================================================
+# This playbook runs pre-validation, executes the change, then runs
+# post-validation and generates the report — all in one run.
+#
+# For AWX, prefer using the Workflow Template (see awx/ directory) which
+# gives you visual node-based control. Use this playbook for CLI-driven
+# or simpler use cases.
+#
+# Usage:
+#   ansible-playbook playbooks/full_validation_workflow.yml \
+#     -i inventories/production/hosts.yml \
+#     -e change_ticket=CHG0012345 \
+#     -e change_playbook=../path/to/your_change.yml \
+#     -e "expected_changes=['bgp_summary','route_summary']"
+# =============================================================================
+
+# ============================
+# PHASE 1: PRE-VALIDATION
+# ============================
+- name: "Phase 1 — Pre-Validation Setup"
+  hosts: localhost
+  gather_facts: true
+  roles:
+    - role: validate_common
+      validation_phase: "pre"
+
+- name: "Phase 1 — Pre-Validate Arista"
+  hosts: arista
+  gather_facts: false
+  roles:
+    - role: validate_arista
+      validation_phase: "pre"
+
+- name: "Phase 1 — Pre-Validate Cisco ACI"
+  hosts: cisco_aci
+  gather_facts: false
+  roles:
+    - role: validate_cisco_aci
+      validation_phase: "pre"
+
+- name: "Phase 1 — Pre-Validate Cisco Catalyst"
+  hosts: cisco_catalyst
+  gather_facts: false
+  roles:
+    - role: validate_cisco_catalyst
+      validation_phase: "pre"
+
+- name: "Phase 1 — Pre-Validate NSX (Read-Only)"
+  hosts: nsx
+  gather_facts: false
+  roles:
+    - role: validate_nsx
+      validation_phase: "pre"
+
+# ============================
+# PHASE 2: EXECUTE CHANGE
+# ============================
+- name: "Phase 2 — Execute Change Playbook"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Import the change playbook"
+      ansible.builtin.include_tasks: "{{ change_playbook }}"
+      when: change_playbook is defined
+
+    - name: "No change playbook specified — manual change window"
+      ansible.builtin.pause:
+        prompt: |
+          ============================================
+          PRE-VALIDATION COMPLETE
+          Change Ticket: {{ change_ticket }}
+          ============================================
+          Make your changes now, then press ENTER
+          to proceed to post-validation.
+          ============================================
+      when: change_playbook is not defined
+
+# ============================
+# PHASE 3: POST-VALIDATION
+# ============================
+- name: "Phase 3 — Post-Validation Setup"
+  hosts: localhost
+  gather_facts: true
+  roles:
+    - role: validate_common
+      validation_phase: "post"
+
+- name: "Phase 3 — Post-Validate Arista"
+  hosts: arista
+  gather_facts: false
+  roles:
+    - role: validate_arista
+      validation_phase: "post"
+
+- name: "Phase 3 — Post-Validate Cisco ACI"
+  hosts: cisco_aci
+  gather_facts: false
+  roles:
+    - role: validate_cisco_aci
+      validation_phase: "post"
+
+- name: "Phase 3 — Post-Validate Cisco Catalyst"
+  hosts: cisco_catalyst
+  gather_facts: false
+  roles:
+    - role: validate_cisco_catalyst
+      validation_phase: "post"
+
+- name: "Phase 3 — Post-Validate NSX (Read-Only)"
+  hosts: nsx
+  gather_facts: false
+  roles:
+    - role: validate_nsx
+      validation_phase: "post"
+
+# ============================
+# PHASE 4: COMPARE & REPORT
+# ============================
+- name: "Phase 4 — Compare Pre vs Post"
+  hosts: network_all
+  gather_facts: false
+  tasks:
+    - name: "Run comparison"
+      ansible.builtin.include_role:
+        name: validate_common
+        tasks_from: compare
+
+- name: "Phase 4 — Generate Audit Report"
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: "Collect all diff files"
+      ansible.builtin.find:
+        paths: "{{ snapshot_dir }}"
+        patterns: "diff_*.json"
+      register: diff_files
+
+    - name: "Load all diffs"
+      ansible.builtin.set_fact:
+        all_diffs: "{{ all_diffs | default([]) + [lookup('file', item.path) | from_json] }}"
+      loop: "{{ diff_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: "Load metadata"
+      ansible.builtin.set_fact:
+        pre_metadata: "{{ lookup('file', snapshot_dir + '/pre_metadata.json') | from_json }}"
+        post_metadata: "{{ lookup('file', snapshot_dir + '/post_metadata.json') | from_json }}"
+
+    - name: "Generate JSON report"
+      ansible.builtin.copy:
+        content: |
+          {{ {
+            'report_type': 'Network Change Validation',
+            'change_ticket': change_ticket,
+            'pre_validation': pre_metadata,
+            'post_validation': post_metadata,
+            'results': all_diffs,
+            'summary': {
+              'total_hosts': all_diffs | length,
+              'total_checks': all_diffs | map(attribute='diffs') | map('length') | sum,
+              'changed_checks': all_diffs | map(attribute='diffs') | map('selectattr', 'status', 'eq', 'CHANGED') | map('list') | map('length') | sum
+            }
+          } | to_nice_json }}
+        dest: "{{ report_dir }}/validation_report_{{ change_ticket }}.json"
+        mode: "0644"
+
+    - name: "Generate HTML audit report"
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/validation_report.html.j2"
+        dest: "{{ report_dir }}/validation_report_{{ change_ticket }}.html"
+        mode: "0644"
+      vars:
+        report_data:
+          change_ticket: "{{ change_ticket }}"
+          pre_metadata: "{{ pre_metadata }}"
+          post_metadata: "{{ post_metadata }}"
+          results: "{{ all_diffs }}"
+
+    - name: "Final Summary"
+      ansible.builtin.debug:
+        msg: |
+          =============================================
+           NETWORK CHANGE VALIDATION COMPLETE
+          =============================================
+           Ticket:  {{ change_ticket }}
+           Reports: {{ report_dir }}
+          =============================================

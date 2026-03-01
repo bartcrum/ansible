@@ -1,0 +1,9 @@
+---
+# Phase: "pre" or "post"
+validation_phase: "pre"
+
+# Where to write snapshot JSON files
+snapshot_dir: "{{ validation_output_dir }}/snapshots"
+
+# Report output directory
+report_dir: "{{ validation_output_dir }}/reports"

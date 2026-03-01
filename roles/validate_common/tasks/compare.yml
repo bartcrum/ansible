@@ -1,0 +1,132 @@
+---
+# =============================================================================
+# validate_common/tasks/compare.yml
+# Compare pre vs post snapshots and produce a structured diff
+# =============================================================================
+
+# --- Resolve per-host scope from manifest (if provided) ---
+- name: "Load change manifest for per-host scope resolution"
+  ansible.builtin.include_tasks: load_manifest.yml
+  when: change_manifest is defined or change_manifest_data is defined
+
+- name: "Load pre-validation snapshot for {{ inventory_hostname }}"
+  ansible.builtin.slurp:
+    src: "{{ snapshot_dir }}/pre_{{ inventory_hostname }}.json"
+  register: pre_snapshot_raw
+  delegate_to: localhost
+
+- name: "Load post-validation snapshot for {{ inventory_hostname }}"
+  ansible.builtin.slurp:
+    src: "{{ snapshot_dir }}/post_{{ inventory_hostname }}.json"
+  register: post_snapshot_raw
+  delegate_to: localhost
+
+- name: "Parse snapshots"
+  ansible.builtin.set_fact:
+    pre_snapshot: "{{ pre_snapshot_raw.content | b64decode | from_json }}"
+    post_snapshot: "{{ post_snapshot_raw.content | b64decode | from_json }}"
+
+- name: "Compare pre vs post — identify changes per check"
+  ansible.builtin.set_fact:
+    validation_diffs: >-
+      {%- set diffs = [] -%}
+      {%- for key in pre_snapshot.keys() | union(post_snapshot.keys()) -%}
+        {%- set pre_val = pre_snapshot.get(key, 'NOT_PRESENT') -%}
+        {%- set post_val = post_snapshot.get(key, 'NOT_PRESENT') -%}
+        {%- if pre_val != post_val -%}
+          {%- set _ = diffs.append({
+            'check': key,
+            'status': 'CHANGED',
+            'pre': pre_val,
+            'post': post_val
+          }) -%}
+        {%- else -%}
+          {%- set _ = diffs.append({
+            'check': key,
+            'status': 'UNCHANGED',
+            'pre': pre_val,
+            'post': post_val
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ diffs }}
+
+- name: "Write comparison result for {{ inventory_hostname }}"
+  ansible.builtin.copy:
+    content: "{{ { 'host': inventory_hostname, 'change_ticket': change_ticket, 'diffs': validation_diffs } | to_nice_json }}"
+    dest: "{{ snapshot_dir }}/diff_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost
+
+- name: "Summary — changed checks for {{ inventory_hostname }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ validation_diffs | selectattr('status', 'eq', 'CHANGED') | list | length }}
+      of {{ validation_diffs | length }} checks changed.
+
+- name: "Classify each diff against manifest scope"
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {%- set effective_expected = _host_expected_changes | default(expected_changes | default([])) -%}
+      {%- set effective_forbidden = _host_must_not_change | default([]) -%}
+      {%- set results = [] -%}
+      {%- for d in validation_diffs -%}
+        {%- if d.status == 'CHANGED' and d.check in effective_forbidden -%}
+          {%- set _ = results.append(d | combine({'verdict': 'FORBIDDEN_DRIFT'})) -%}
+        {%- elif d.status == 'CHANGED' and d.check in effective_expected -%}
+          {%- set _ = results.append(d | combine({'verdict': 'EXPECTED_CHANGE'})) -%}
+        {%- elif d.status == 'CHANGED' -%}
+          {%- set _ = results.append(d | combine({'verdict': 'UNEXPECTED_CHANGE'})) -%}
+        {%- else -%}
+          {%- set _ = results.append(d | combine({'verdict': 'STABLE'})) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ results }}
+
+- name: "Write enriched comparison result for {{ inventory_hostname }}"
+  ansible.builtin.copy:
+    content: >-
+      {{ {
+        'host': inventory_hostname,
+        'change_ticket': change_ticket,
+        'groups': group_names,
+        'expected_changes': _host_expected_changes | default(expected_changes | default([])),
+        'must_not_change': _host_must_not_change | default([]),
+        'diffs': validation_results
+      } | to_nice_json }}
+    dest: "{{ snapshot_dir }}/diff_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost
+
+- name: "Summary — change classification for {{ inventory_hostname }}"
+  ansible.builtin.debug:
+    msg: |
+      {{ inventory_hostname }} validation results:
+        EXPECTED changes:   {{ validation_results | selectattr('verdict', 'eq', 'EXPECTED_CHANGE') | map(attribute='check') | list | join(', ') | default('none') }}
+        UNEXPECTED changes: {{ validation_results | selectattr('verdict', 'eq', 'UNEXPECTED_CHANGE') | map(attribute='check') | list | join(', ') | default('none') }}
+        FORBIDDEN drift:    {{ validation_results | selectattr('verdict', 'eq', 'FORBIDDEN_DRIFT') | map(attribute='check') | list | join(', ') | default('none') }}
+        STABLE checks:      {{ validation_results | selectattr('verdict', 'eq', 'STABLE') | list | length }}
+
+- name: "FAIL — Forbidden checks changed on {{ inventory_hostname }}"
+  ansible.builtin.assert:
+    that:
+      - validation_results | selectattr('verdict', 'eq', 'FORBIDDEN_DRIFT') | list | length == 0
+    fail_msg: >-
+      CRITICAL DRIFT on {{ inventory_hostname }}!
+      These checks are in must_not_change but changed anyway:
+      {{ validation_results | selectattr('verdict', 'eq', 'FORBIDDEN_DRIFT') | map(attribute='check') | list | join(', ') }}.
+    success_msg: "No forbidden drift detected on {{ inventory_hostname }}."
+  when: fail_on_drift | default(false) | bool
+
+- name: "WARN — Unexpected changes on {{ inventory_hostname }}"
+  ansible.builtin.assert:
+    that:
+      - validation_results | selectattr('verdict', 'eq', 'UNEXPECTED_CHANGE') | list | length == 0
+    fail_msg: >-
+      WARNING: Unexpected changes on {{ inventory_hostname }}
+      outside the expected_changes list:
+      {{ validation_results | selectattr('verdict', 'eq', 'UNEXPECTED_CHANGE') | map(attribute='check') | list | join(', ') }}.
+      These are not in must_not_change, so the workflow continues.
+    success_msg: "All changes on {{ inventory_hostname }} match the expected list."
+  when: fail_on_drift | default(false) | bool
+  ignore_errors: true

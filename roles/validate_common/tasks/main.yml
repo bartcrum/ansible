@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# validate_common — shared setup and comparison logic
+# =============================================================================
+- name: "Create output directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ snapshot_dir }}"
+    - "{{ report_dir }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: "Record validation metadata"
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'change_ticket': change_ticket,
+        'validation_phase': validation_phase,
+        'timestamp': ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')),
+        'executed_by': lookup('env', 'USER') | default('awx'),
+        'target_hosts': ansible_play_hosts | list
+      } | to_nice_json }}
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_metadata.json"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true

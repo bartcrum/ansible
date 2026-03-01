@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# Change Manifest for: Add VLAN 450 to Arista leaf switches
+# Change Ticket: CHG0012345
+# =============================================================================
+
+change_description: "Add VLAN 450 (APP_TIER_NEW) to DC leaf switches and trunk uplinks"
+
+change_scope:
+
+  arista:
+    hosts: "leaf-*"
+    expected_changes:
+      - vlans                  # New VLAN 450 will appear
+      - interfaces_status      # Trunk ports will show added VLAN
+      - interfaces_config      # L2 interface config will change
+    must_not_change:
+      - bgp_summary            # BGP must stay stable
+      - bgp_config             # BGP config must not change
+      - ospf_neighbors         # OSPF must stay stable
+      - mlag                   # MLAG must stay healthy
+      - route_summary          # No routing changes expected
+
+  cisco_catalyst:
+    hosts: "all"
+    expected_changes: []       # Catalyst edge should not be touched
+    must_not_change:
+      - bgp_summary
+      - ospf_neighbors
+      - interfaces_status
+
+  cisco_aci:
+    hosts: "all"
+    expected_changes: []       # ACI not part of this change
+    must_not_change:
+      - fabric_health
+
+  nsx:
+    hosts: "all"
+    expected_changes: []       # NSX should be unaffected
+
+global_must_not_change:
+  - ntp
+  - version
+  - stp_summary               # STP topology should not shift

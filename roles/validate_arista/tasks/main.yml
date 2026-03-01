@@ -1,0 +1,15 @@
+---
+# =============================================================================
+# validate_arista — Collect EOS state for pre/post comparison
+# =============================================================================
+# Supports two modes:
+#   arista_validation_mode: "standard"  (default) — raw show commands + resource modules
+#   arista_validation_mode: "avd"       — uses AVD's eos_validate_state + structured data
+#
+# When using AVD mode, the role leverages the same structured intended state
+# that AVD uses to build configs, so validations test against design intent,
+# not just "did something change."
+# =============================================================================
+
+- name: "Arista — Route to validation mode"
+  ansible.builtin.include_tasks: "{{ arista_validation_mode | default('standard') }}.yml"

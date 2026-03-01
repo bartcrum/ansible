@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# Arista EOS platform variables
+# =============================================================================
+ansible_network_os: arista.eos.eos
+ansible_connection: ansible.netcommon.network_cli
+ansible_become: true
+ansible_become_method: enable
+
+# Validation commands to capture for pre/post comparison
+arista_validation_commands:
+  - command: "show version"
+    key: "version"
+    description: "Software version and uptime"
+  - command: "show interfaces status"
+    key: "interfaces_status"
+    description: "Interface operational state"
+  - command: "show ip interface brief"
+    key: "ip_interfaces"
+    description: "IP interface summary"
+  - command: "show ip route summary"
+    key: "route_summary"
+    description: "Routing table summary"
+  - command: "show ip bgp summary"
+    key: "bgp_summary"
+    description: "BGP neighbor state"
+  - command: "show ip ospf neighbor"
+    key: "ospf_neighbors"
+    description: "OSPF adjacencies"
+  - command: "show mlag detail"
+    key: "mlag"
+    description: "MLAG domain state"
+  - command: "show vlan brief"
+    key: "vlans"
+    description: "VLAN database"
+  - command: "show spanning-tree summary"
+    key: "stp_summary"
+    description: "Spanning-tree topology"
+  - command: "show logging last 50"
+    key: "recent_logs"
+    description: "Recent syslog messages"
+  - command: "show ntp status"
+    key: "ntp"
+    description: "NTP synchronization"
+
+# Structured validation checks (parsed with resource modules)
+arista_structured_checks:
+  - resource: arista.eos.eos_bgp_global
+    key: "bgp_config"
+  - resource: arista.eos.eos_interfaces
+    key: "interfaces_config"
+  - resource: arista.eos.eos_l3_interfaces
+    key: "l3_interfaces"

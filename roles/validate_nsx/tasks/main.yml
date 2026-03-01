@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# validate_nsx — READ-ONLY state collection from NSX-T Manager API
+# NSX is not managed by this team — this provides cross-domain visibility.
+# =============================================================================
+
+- name: "NSX {{ validation_phase }} — Query NSX Manager API endpoints"
+  ansible.builtin.uri:
+    url: "https://{{ nsx_hostname }}{{ item.path }}"
+    method: GET
+    user: "{{ nsx_username }}"
+    password: "{{ nsx_password }}"
+    validate_certs: "{{ nsx_validate_certs }}"
+    force_basic_auth: true
+    headers:
+      Accept: "application/json"
+    status_code: [200]
+    timeout: "{{ validation_command_timeout | default(30) }}"
+  register: nsx_query_results
+  loop: "{{ nsx_validation_endpoints }}"
+  loop_control:
+    label: "{{ item.key }}"
+  retries: "{{ validation_retries | default(3) }}"
+  delay: "{{ validation_retry_delay | default(5) }}"
+  until: nsx_query_results is not failed
+  ignore_errors: true
+
+- name: "NSX {{ validation_phase }} — Build snapshot dict"
+  ansible.builtin.set_fact:
+    nsx_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for result in nsx_query_results.results -%}
+        {%- if result is succeeded -%}
+          {%- set _ = snapshot.update({
+            result.item.key: {
+              'result_count': result.json.result_count | default(result.json.results | default([]) | length),
+              'data': result.json.results | default(result.json | default({}))
+            }
+          }) -%}
+        {%- else -%}
+          {%- set _ = snapshot.update({
+            result.item.key: {
+              'error': 'Query failed — ' + (result.msg | default('unknown error')),
+              'data': {}
+            }
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ snapshot }}
+
+- name: "NSX {{ validation_phase }} — Write snapshot"
+  ansible.builtin.copy:
+    content: "{{ nsx_snapshot | to_nice_json }}"
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost

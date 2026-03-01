@@ -1,0 +1,208 @@
+---
+# =============================================================================
+# AWX Setup Playbook — Automate creation of AWX objects
+# =============================================================================
+# Run this playbook against your AWX/Tower instance to create the project,
+# job templates, workflow template, credential types, and surveys.
+#
+# Prerequisites:
+#   pip install awxkit  (or)  ansible-galaxy collection install awx.awx
+#
+# Usage:
+#   ansible-playbook awx/setup_awx.yml \
+#     -e awx_host=https://awx.example.com \
+#     -e awx_token=your_oauth_token
+# =============================================================================
+
+- name: "Configure AWX for Network Validation Workflow"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    awx_host: "{{ lookup('env', 'AWX_HOST') | default('https://awx.example.com', true) }}"
+    awx_token: "{{ lookup('env', 'AWX_TOKEN') | default('changeme', true) }}"
+    awx_organization: "Default"
+    awx_project_name: "Network Validation"
+    awx_scm_url: "{{ lookup('env', 'AWX_SCM_URL') | default('https://git.example.com/netops/network-validation.git', true) }}"
+    awx_inventory_name: "Production Network"
+
+  collections:
+    - awx.awx
+
+  tasks:
+
+    # --- Project ---
+    - name: "Create AWX Project"
+      awx.awx.project:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "{{ awx_project_name }}"
+        organization: "{{ awx_organization }}"
+        scm_type: git
+        scm_url: "{{ awx_scm_url }}"
+        scm_update_on_launch: true
+        state: present
+
+    # --- Custom Credential Types ---
+    - name: "Create ACI Credential Type"
+      awx.awx.credential_type:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "Cisco ACI APIC"
+        kind: cloud
+        inputs:
+          fields:
+            - id: aci_username
+              label: "APIC Username"
+              type: string
+            - id: aci_password
+              label: "APIC Password"
+              type: string
+              secret: true
+          required:
+            - aci_username
+            - aci_password
+        injectors:
+          extra_vars:
+            aci_username: !unsafe "{{ aci_username }}"
+            aci_password: !unsafe "{{ aci_password }}"
+        state: present
+
+    - name: "Create NSX Credential Type"
+      awx.awx.credential_type:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "VMware NSX-T Manager"
+        kind: cloud
+        inputs:
+          fields:
+            - id: nsx_username
+              label: "NSX Username"
+              type: string
+            - id: nsx_password
+              label: "NSX Password"
+              type: string
+              secret: true
+          required:
+            - nsx_username
+            - nsx_password
+        injectors:
+          extra_vars:
+            nsx_username: !unsafe "{{ nsx_username }}"
+            nsx_password: !unsafe "{{ nsx_password }}"
+        state: present
+
+    # --- Job Templates ---
+    - name: "Create Pre-Validation Job Template"
+      awx.awx.job_template:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "Network - Pre-Validation"
+        organization: "{{ awx_organization }}"
+        project: "{{ awx_project_name }}"
+        playbook: "playbooks/pre_validate.yml"
+        inventory: "{{ awx_inventory_name }}"
+        job_type: run
+        ask_variables_on_launch: true
+        state: present
+
+    - name: "Create Post-Validation Job Template"
+      awx.awx.job_template:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "Network - Post-Validation & Report"
+        organization: "{{ awx_organization }}"
+        project: "{{ awx_project_name }}"
+        playbook: "playbooks/post_validate.yml"
+        inventory: "{{ awx_inventory_name }}"
+        job_type: run
+        ask_variables_on_launch: true
+        state: present
+
+    # --- Workflow Template ---
+    - name: "Create Workflow Template"
+      awx.awx.workflow_job_template:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        name: "Network Change Validation Workflow"
+        organization: "{{ awx_organization }}"
+        ask_variables_on_launch: true
+        survey_enabled: true
+        survey_spec:
+          name: "Change Validation Parameters"
+          description: "Parameters for network change validation"
+          spec:
+            - question_name: "Change Ticket Number"
+              variable: "change_ticket"
+              type: "text"
+              required: true
+              default: ""
+            - question_name: "Fail on Unexpected Drift?"
+              variable: "fail_on_drift"
+              type: "multiplechoice"
+              required: true
+              default: "true"
+              choices: "true\nfalse"
+        state: present
+
+    - name: "Add Pre-Validation node"
+      awx.awx.workflow_job_template_node:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        workflow_job_template: "Network Change Validation Workflow"
+        identifier: "pre_validate"
+        unified_job_template: "Network - Pre-Validation"
+        organization: "{{ awx_organization }}"
+        state: present
+
+    - name: "Add Approval node (manual change gate)"
+      awx.awx.workflow_job_template_node:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        workflow_job_template: "Network Change Validation Workflow"
+        identifier: "approval_gate"
+        approval_node:
+          name: "Approve — Changes Applied"
+          description: "Confirm that the change has been applied and post-validation should proceed."
+          timeout: 3600
+        state: present
+
+    - name: "Add Post-Validation node"
+      awx.awx.workflow_job_template_node:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        workflow_job_template: "Network Change Validation Workflow"
+        identifier: "post_validate"
+        unified_job_template: "Network - Post-Validation & Report"
+        organization: "{{ awx_organization }}"
+        state: present
+
+    - name: "Link pre_validate → approval_gate (on success)"
+      awx.awx.workflow_job_template_node:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        workflow_job_template: "Network Change Validation Workflow"
+        identifier: "pre_validate"
+        success_nodes:
+          - "approval_gate"
+        state: present
+
+    - name: "Link approval_gate → post_validate (on success)"
+      awx.awx.workflow_job_template_node:
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        workflow_job_template: "Network Change Validation Workflow"
+        identifier: "approval_gate"
+        success_nodes:
+          - "post_validate"
+        state: present
+
+    - name: "Setup complete"
+      ansible.builtin.debug:
+        msg: |
+          AWX Network Validation Workflow configured successfully.
+          - Project: {{ awx_project_name }}
+          - Pre-Validation Job Template: Network - Pre-Validation
+          - Post-Validation Job Template: Network - Post-Validation & Report
+          - Workflow Template: Network Change Validation Workflow

@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# VMware NSX-T platform variables
+# =============================================================================
+# NSX is not managed by the networking team — these are READ-ONLY checks
+# for cross-domain visibility during change windows.
+# =============================================================================
+ansible_connection: local
+
+# NSX Manager API — credentials come from AWX credential type or vault.
+nsx_hostname: "{{ ansible_host }}"
+nsx_username: "{{ vault_nsx_username | default('admin') }}"
+nsx_password: "{{ vault_nsx_password | default('changeme') }}"
+nsx_validate_certs: false
+
+# NSX REST API endpoints for read-only state collection
+nsx_validation_endpoints:
+  - name: "Transport Zones"
+    path: "/api/v1/transport-zones"
+    key: "transport_zones"
+    description: "NSX transport zone inventory"
+  - name: "Logical Switches"
+    path: "/api/v1/logical-switches"
+    key: "logical_switches"
+    description: "Logical switch / segment list"
+  - name: "Logical Routers"
+    path: "/api/v1/logical-routers"
+    key: "logical_routers"
+    description: "T0/T1 router inventory"
+  - name: "Edge Clusters"
+    path: "/api/v1/edge-clusters"
+    key: "edge_clusters"
+    description: "Edge cluster health"
+  - name: "Transport Node Status"
+    path: "/api/v1/transport-nodes/state"
+    key: "transport_node_state"
+    description: "Transport node connectivity"
+  - name: "Alarms"
+    path: "/api/v1/alarms"
+    key: "alarms"
+    description: "Active alarms"
+  - name: "DFW Rules Count"
+    path: "/policy/api/v1/infra/domains/default/security-policies"
+    key: "security_policies"
+    description: "Distributed firewall policy summary"

@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# validate_cisco_aci — Collect ACI fabric state via APIC REST API
+# =============================================================================
+
+- name: "ACI {{ validation_phase }} — Query APIC endpoints"
+  cisco.aci.aci_rest:
+    host: "{{ aci_hostname }}"
+    username: "{{ aci_username }}"
+    password: "{{ aci_password }}"
+    validate_certs: "{{ aci_validate_certs }}"
+    method: get
+    path: "/{{ item.dn }}"
+  register: aci_query_results
+  loop: "{{ aci_validation_queries }}"
+  loop_control:
+    label: "{{ item.key }}"
+  retries: "{{ validation_retries | default(3) }}"
+  delay: "{{ validation_retry_delay | default(5) }}"
+  until: aci_query_results is not failed
+
+- name: "ACI {{ validation_phase }} — Build snapshot dict"
+  ansible.builtin.set_fact:
+    aci_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for result in aci_query_results.results -%}
+        {%- set _ = snapshot.update({
+          result.item.key: {
+            'total_count': result.totalCount | default(0),
+            'data': result.imdata | default([])
+          }
+        }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+
+- name: "ACI {{ validation_phase }} — Write snapshot"
+  ansible.builtin.copy:
+    content: "{{ aci_snapshot | to_nice_json }}"
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost

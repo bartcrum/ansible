@@ -1,0 +1,63 @@
+---
+# =============================================================================
+# Change Manifest for: AVD leaf deploy (e.g., new tenant/VLAN addition)
+# =============================================================================
+# This manifest is tailored for an AVD-driven change where new tenant
+# VLANs, SVIs, or BGP EVPN services are being added to leaf switches.
+#
+# When using AVD mode, eos_validate_state runs automatically and tests
+# against the intended design — so the "expected vs unexpected" model
+# works alongside AVD's own compliance testing.
+# =============================================================================
+
+change_description: "AVD fabric deploy — add new tenant VLANs and EVPN services on leaf tier"
+
+change_scope:
+
+  arista:
+    hosts: "leaf-*"
+    expected_changes:
+      - vlans                       # New VLANs from AVD tenant model
+      - interfaces_status           # SVIs and trunk changes
+      - interfaces_config           # L2/L3 interface config
+      - bgp_summary                 # New EVPN neighbors or route changes
+      - bgp_config                  # AVD will add BGP EVPN config
+      - route_summary               # New routes from new SVIs
+      - avd_validate_state          # AVD validation will reflect new state
+      - avd_design_compliance       # Compliance numbers may shift
+    must_not_change:
+      - mlag                        # MLAG domain must stay stable
+      - ospf_neighbors              # Underlay OSPF must not change
+      - stp_summary                 # STP root should not move
+
+  # Spine switches — only control plane changes expected
+  # Use a separate group or host pattern if spines are in the same 'arista' group
+  # arista_spines:
+  #   hosts: "spine-*"
+  #   expected_changes:
+  #     - bgp_summary              # Spine will see new EVPN routes
+  #     - bgp_config               # BGP config may change if new peers
+  #   must_not_change:
+  #     - ospf_neighbors
+  #     - interfaces_status        # No physical changes on spines
+
+  cisco_catalyst:
+    hosts: "all"
+    expected_changes: []            # Edge routing should not be affected
+    must_not_change:
+      - bgp_summary
+      - ospf_neighbors
+
+  cisco_aci:
+    hosts: "all"
+    expected_changes: []            # ACI not part of this change
+    must_not_change:
+      - fabric_health
+
+  nsx:
+    hosts: "all"
+    expected_changes: []            # NSX should be unaffected
+
+global_must_not_change:
+  - ntp
+  - version

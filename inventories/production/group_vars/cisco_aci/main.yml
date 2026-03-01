@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# Cisco ACI platform variables
+# =============================================================================
+# ACI uses REST API via the cisco.aci collection — no network_cli needed.
+ansible_connection: local
+aci_validate_certs: false
+
+# APIC credentials — in AWX these come from a credential type, not vars.
+# Shown here as placeholders; override in AWX credential or vault.
+aci_hostname: "{{ ansible_host }}"
+aci_username: "{{ vault_aci_username | default('admin') }}"
+aci_password: "{{ vault_aci_password | default('changeme') }}"
+
+# ACI validation API endpoints to query for pre/post snapshots
+aci_validation_queries:
+  - name: "Fabric Health"
+    dn: "api/class/fabricHealthTotal.json"
+    key: "fabric_health"
+    description: "Overall fabric health score"
+  - name: "Tenant List"
+    dn: "api/class/fvTenant.json"
+    key: "tenants"
+    description: "All ACI tenants"
+  - name: "Bridge Domains"
+    dn: "api/class/fvBD.json"
+    key: "bridge_domains"
+    description: "Bridge domain inventory"
+  - name: "EPG Summary"
+    dn: "api/class/fvAEPg.json"
+    key: "epgs"
+    description: "Endpoint groups"
+  - name: "Contracts"
+    dn: "api/class/vzBrCP.json"
+    key: "contracts"
+    description: "Contract policies"
+  - name: "Fabric Node Health"
+    dn: "api/class/fabricNodeHealth.json"
+    key: "node_health"
+    description: "Per-node health scores"
+  - name: "Interface Faults"
+    dn: "api/class/faultInst.json?query-target-filter=and(eq(faultInst.severity,\"critical\"))"
+    key: "critical_faults"
+    description: "Active critical faults"
+  - name: "L3Out Summary"
+    dn: "api/class/l3extOut.json"
+    key: "l3outs"
+    description: "L3Out external connectivity"
+  - name: "VRF Contexts"
+    dn: "api/class/fvCtx.json"
+    key: "vrfs"
+    description: "VRF / context inventory"

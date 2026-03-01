@@ -1,0 +1,48 @@
+---
+# =============================================================================
+# EXAMPLE CHANGE PLAYBOOK — Add VLAN 450 to Arista leaf switches
+# =============================================================================
+# This is an example showing how your change playbooks integrate with the
+# validation framework. The key points:
+#
+# 1. Your change playbook is just a normal playbook — no special wiring.
+# 2. The change manifest (add_vlan_450_manifest.yml) declares what you
+#    EXPECT to change and what MUST NOT change.
+# 3. The validation workflow wraps your change with pre/post snapshots.
+#
+# Usage (standalone with validation):
+#   ansible-playbook playbooks/full_validation_workflow.yml \
+#     -i inventories/production/hosts.yml \
+#     -e change_ticket=CHG0012345 \
+#     -e change_playbook=playbooks/examples/add_vlan_450.yml \
+#     -e change_manifest=playbooks/examples/add_vlan_450_manifest.yml
+#
+# Usage (via AWX):
+#   Set extra_vars in the AWX survey/launch:
+#     change_playbook: playbooks/examples/add_vlan_450.yml
+#     change_manifest: playbooks/examples/add_vlan_450_manifest.yml
+# =============================================================================
+
+- name: "Add VLAN 450 to Arista leaf switches"
+  hosts: arista
+  gather_facts: false
+  tasks:
+
+    - name: "Create VLAN 450"
+      arista.eos.eos_vlans:
+        config:
+          - vlan_id: 450
+            name: APP_TIER_NEW
+            state: active
+        state: merged
+
+    - name: "Add VLAN 450 to trunk interfaces"
+      arista.eos.eos_l2_interfaces:
+        config:
+          - name: "{{ item }}"
+            mode: trunk
+            trunk:
+              allowed_vlans:
+                - "450"
+        state: merged
+      loop: "{{ vlan_450_trunk_ports | default(['Ethernet49/1', 'Ethernet50/1']) }}"

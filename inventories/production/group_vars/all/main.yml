@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# Global variables shared across all platforms
+# =============================================================================
+
+# Directory where pre/post snapshots and reports are written.
+# On AWX this maps to a project artifact directory or an external share.
+validation_output_dir: "/tmp/network_validation/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+# Unique run identifier — passed from AWX extra_vars or auto-generated.
+change_ticket: "{{ awx_job_id | default('MANUAL-' + lookup('pipe', 'date +%Y%m%d%H%M%S')) }}"
+
+# Report format options: html, json, both
+report_format: "both"
+
+# When true, the workflow will FAIL if post-validation detects drift from
+# the expected state, giving you a hard gate for change control.
+fail_on_drift: true
+
+# Timeout for individual device command collection (seconds)
+validation_command_timeout: 30
+
+# Number of retries for device connectivity
+validation_retries: 3
+validation_retry_delay: 5

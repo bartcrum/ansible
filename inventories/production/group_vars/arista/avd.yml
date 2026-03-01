@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# Arista AVD-specific variables
+# =============================================================================
+# Only loaded when arista_validation_mode: "avd"
+# These settings control how the validation role interacts with AVD.
+# =============================================================================
+
+# Set this to "avd" to enable AVD-integrated validation.
+# Set to "standard" (or omit) for raw show command mode.
+# arista_validation_mode: "avd"
+
+# -------------------------------------------------------------------
+# AVD inventory / config paths
+# -------------------------------------------------------------------
+# Where your AVD project generates intended configs and structured data.
+# These are typically set at the AVD project level, but can be overridden here.
+
+# Path to AVD intended configurations directory
+# avd_intended_dir: "{{ playbook_dir }}/../avd/intended"
+
+# Path to AVD structured configs directory
+# avd_structured_dir: "{{ playbook_dir }}/../avd/intended/structured_configs"
+
+# -------------------------------------------------------------------
+# AVD eos_validate_state settings
+# -------------------------------------------------------------------
+# Run the full AVD eos_validate_state role during validation?
+avd_run_eos_validate_state: true
+
+# Which AVD validation categories to run.
+# Comment out to run ALL categories.
+# avd_validation_categories:
+#   - bgp
+#   - interfaces
+#   - mlag
+#   - routing
+#   - system
+#   - connectivity
+
+# AVD connection method — eAPI is typical for AVD deployments
+# Uncomment these to override the network_cli defaults in main.yml
+# when your AVD fabric uses eAPI instead of SSH:
+# ansible_connection: httpapi
+# ansible_httpapi_use_ssl: true
+# ansible_httpapi_validate_certs: false
+# ansible_network_os: arista.eos.eos

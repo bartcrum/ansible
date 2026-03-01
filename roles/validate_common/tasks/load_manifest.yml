@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# validate_common/tasks/load_manifest.yml
+# Load the change manifest and resolve per-host expected/forbidden checks
+# =============================================================================
+
+- name: "Load change manifest from file"
+  ansible.builtin.include_vars:
+    file: "{{ change_manifest }}"
+    name: change_manifest_data
+  when:
+    - change_manifest is defined
+    - change_manifest_data is not defined
+  delegate_to: localhost
+  run_once: true
+
+- name: "Resolve expected_changes for this host from manifest"
+  ansible.builtin.set_fact:
+    _host_expected_changes: >-
+      {%- set changes = [] -%}
+      {%- if change_manifest_data is defined and change_manifest_data.change_scope is defined -%}
+        {%- for group_name, scope in change_manifest_data.change_scope.items() -%}
+          {%- if group_name in group_names -%}
+            {%- set host_match = scope.hosts | default('all') -%}
+            {%- if host_match == 'all' or inventory_hostname is match(host_match) -%}
+              {%- set _ = changes.extend(scope.expected_changes | default([])) -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- elif expected_changes is defined -%}
+        {%- set _ = changes.extend(expected_changes) -%}
+      {%- endif -%}
+      {{ changes | unique | list }}
+
+    _host_must_not_change: >-
+      {%- set forbidden = [] -%}
+      {%- if change_manifest_data is defined -%}
+        {%- set _ = forbidden.extend(change_manifest_data.global_must_not_change | default([])) -%}
+        {%- if change_manifest_data.change_scope is defined -%}
+          {%- for group_name, scope in change_manifest_data.change_scope.items() -%}
+            {%- if group_name in group_names -%}
+              {%- set host_match = scope.hosts | default('all') -%}
+              {%- if host_match == 'all' or inventory_hostname is match(host_match) -%}
+                {%- set _ = forbidden.extend(scope.must_not_change | default([])) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endif -%}
+      {{ forbidden | unique | list }}
+
+- name: "Show resolved validation scope for {{ inventory_hostname }}"
+  ansible.builtin.debug:
+    msg: >-
+      Host: {{ inventory_hostname }} |
+      Expected to change: {{ _host_expected_changes | default([]) | join(', ') | default('(nothing)') }} |
+      Must NOT change: {{ _host_must_not_change | default([]) | join(', ') | default('(none specified)') }}

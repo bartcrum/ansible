@@ -1,0 +1,3 @@
+---
+validation_phase: "pre"
+snapshot_dir: "{{ validation_output_dir }}/snapshots"

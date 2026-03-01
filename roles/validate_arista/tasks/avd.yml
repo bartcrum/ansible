@@ -1,0 +1,110 @@
+---
+# =============================================================================
+# validate_arista — AVD mode
+# =============================================================================
+# Uses AVD's structured data and eos_validate_state for Arista validation.
+#
+# How it works:
+#   1. Collects the same raw show commands as standard mode (for pre/post diff)
+#   2. Runs AVD's eos_validate_state which tests operational state against
+#      the AVD structured_config / intended design
+#   3. Captures the AVD validation report as part of the snapshot
+#
+# Requirements:
+#   - arista.avd collection installed
+#   - AVD structured_config vars accessible (typically in host_vars generated
+#     by eos_designs or eos_cli_config_gen)
+#   - avd_inventory_dir pointing to where AVD intended/ configs live
+# =============================================================================
+
+# --- Step 1: Raw show commands (same as standard — needed for pre/post diff) ---
+
+- name: "Arista AVD {{ validation_phase }} — Collect show commands"
+  arista.eos.eos_command:
+    commands:
+      - "{{ item.command }}"
+  register: arista_cmd_results
+  loop: "{{ arista_validation_commands }}"
+  loop_control:
+    label: "{{ item.key }}"
+  retries: "{{ validation_retries | default(3) }}"
+  delay: "{{ validation_retry_delay | default(5) }}"
+  until: arista_cmd_results is not failed
+
+- name: "Arista AVD {{ validation_phase }} — Build command snapshot"
+  ansible.builtin.set_fact:
+    arista_command_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for result in arista_cmd_results.results -%}
+        {%- set _ = snapshot.update({ result.item.key: result.stdout | default([]) | first | default('') }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+
+# --- Step 2: AVD eos_validate_state (tests against intended design) ---
+
+- name: "Arista AVD {{ validation_phase }} — Run AVD eos_validate_state"
+  ansible.builtin.include_role:
+    name: arista.avd.eos_validate_state
+  vars:
+    # Where AVD writes its validation reports
+    validation_report_csv: "{{ snapshot_dir }}/avd_validate_{{ validation_phase }}_{{ inventory_hostname }}.csv"
+    validation_report_md: "{{ snapshot_dir }}/avd_validate_{{ validation_phase }}_{{ inventory_hostname }}.md"
+    # Only run the categories relevant to our checks
+    validation_filter:
+      categories: "{{ avd_validation_categories | default(omit) }}"
+  ignore_errors: true
+  register: avd_validate_result
+  when: avd_run_eos_validate_state | default(true) | bool
+
+# --- Step 3: Collect ANTA-style structured test results (AVD 5.x+) ---
+# AVD 5.x uses ANTA under the hood. If the ANTA catalog is available,
+# capture the structured results for richer reporting.
+
+- name: "Arista AVD {{ validation_phase }} — Collect ANTA results if available"
+  ansible.builtin.set_fact:
+    avd_anta_results: "{{ avd_validate_result.results | default([]) }}"
+  when:
+    - avd_validate_result is defined
+    - avd_validate_result is not skipped
+
+# --- Step 4: Build enriched snapshot with AVD validation verdicts ---
+
+- name: "Arista AVD {{ validation_phase }} — Build AVD validation summary"
+  ansible.builtin.set_fact:
+    avd_validation_snapshot:
+      avd_validate_state:
+        status: "{{ 'PASS' if (avd_validate_result is succeeded) else 'FAIL' }}"
+        failed_tests: "{{ avd_validate_result.msg | default('') }}"
+      avd_design_compliance: >-
+        {%- set compliance = {} -%}
+        {%- if avd_anta_results is defined -%}
+          {%- set total = avd_anta_results | length -%}
+          {%- set passed = avd_anta_results | selectattr('result', 'eq', 'success') | list | length if avd_anta_results | length > 0 else 0 -%}
+          {%- set _ = compliance.update({
+            'total_tests': total,
+            'passed': passed,
+            'failed': total - passed,
+            'compliance_pct': ((passed / total * 100) | round(1)) if total > 0 else 100
+          }) -%}
+        {%- else -%}
+          {%- set _ = compliance.update({
+            'total_tests': 0,
+            'passed': 0,
+            'failed': 0,
+            'compliance_pct': 'N/A — ANTA results not available'
+          }) -%}
+        {%- endif -%}
+        {{ compliance }}
+  when: avd_validate_result is defined and avd_validate_result is not skipped
+
+# --- Step 5: Merge everything into the snapshot ---
+
+- name: "Arista AVD {{ validation_phase }} — Write snapshot"
+  ansible.builtin.copy:
+    content: >-
+      {{ (arista_command_snapshot
+        | combine(avd_validation_snapshot | default({}))
+      ) | to_nice_json }}
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost

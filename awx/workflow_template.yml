@@ -1,0 +1,222 @@
+---
+# =============================================================================
+# AWX WORKFLOW TEMPLATE DEFINITION
+# =============================================================================
+# Import this into AWX using the awx CLI, the AWX API, or the awx.awx
+# Ansible collection. This defines the 3-node workflow:
+#
+#   [Pre-Validate] → [Execute Change] → [Post-Validate + Report]
+#
+# If Pre-Validate fails → workflow aborts (no changes made).
+# If Execute Change fails → Post-Validate still runs (capture failed state).
+# =============================================================================
+
+# -- Step 1: Create the Job Templates that the workflow references -----------
+
+job_templates:
+
+  - name: "Network - Pre-Validation"
+    description: "Capture baseline network state before a change window"
+    job_type: run
+    inventory: "Production Network"
+    project: "Network Validation"
+    playbook: "playbooks/pre_validate.yml"
+    credentials:
+      - "Arista EOS Credentials"
+      - "Cisco IOS Credentials"
+      - "Cisco ACI APIC Credentials"
+      - "VMware NSX Credentials"
+    extra_vars:
+      report_format: "both"
+    survey_enabled: true
+    survey_spec:
+      name: "Change Ticket Survey"
+      description: "Provide the change ticket number for tracking"
+      spec:
+        - question_name: "Change Ticket Number"
+          variable: "change_ticket"
+          type: "text"
+          required: true
+          default: ""
+        - question_name: "Expected Changed Checks"
+          question_description: "Comma-separated list of check keys expected to change (e.g. bgp_summary,route_summary). Leave blank to detect all drift."
+          variable: "expected_changes_csv"
+          type: "text"
+          required: false
+          default: ""
+        - question_name: "Fail on Unexpected Drift?"
+          variable: "fail_on_drift"
+          type: "multiplechoice"
+          required: true
+          default: "true"
+          choices:
+            - "true"
+            - "false"
+
+  - name: "Network - Post-Validation & Report"
+    description: "Capture post-change state, compare to baseline, generate audit report"
+    job_type: run
+    inventory: "Production Network"
+    project: "Network Validation"
+    playbook: "playbooks/post_validate.yml"
+    credentials:
+      - "Arista EOS Credentials"
+      - "Cisco IOS Credentials"
+      - "Cisco ACI APIC Credentials"
+      - "VMware NSX Credentials"
+    extra_vars:
+      report_format: "both"
+
+# -- Step 2: Workflow Template definition ------------------------------------
+
+workflow_templates:
+
+  - name: "Network Change Validation Workflow"
+    description: |
+      End-to-end change validation: pre-validate → execute change → post-validate → audit report.
+      Ensures changes are verified and documented for security and compliance.
+    organization: "Default"
+    survey_enabled: true
+    survey_spec:
+      name: "Change Validation Parameters"
+      description: "Parameters for the change validation workflow"
+      spec:
+        - question_name: "Change Ticket"
+          variable: "change_ticket"
+          type: "text"
+          required: true
+        - question_name: "Expected Changes (comma-separated check keys)"
+          variable: "expected_changes_csv"
+          type: "text"
+          required: false
+          default: ""
+        - question_name: "Fail on Unexpected Drift?"
+          variable: "fail_on_drift"
+          type: "multiplechoice"
+          required: true
+          default: "true"
+          choices: ["true", "false"]
+        - question_name: "Change Playbook (optional)"
+          question_description: "Path to the playbook that performs the actual change. Leave blank for manual change window."
+          variable: "change_playbook"
+          type: "text"
+          required: false
+
+    # Workflow nodes — defines the DAG
+    nodes:
+      - identifier: "pre_validate"
+        unified_job_template:
+          name: "Network - Pre-Validation"
+          type: job_template
+        # Pass survey vars downstream
+        extra_data:
+          change_ticket: "{{ change_ticket }}"
+          expected_changes: "{{ expected_changes_csv.split(',') | map('trim') | select | list if expected_changes_csv else [] }}"
+        success_nodes:
+          - identifier: "execute_change"
+        failure_nodes:
+          - identifier: "pre_validate_failed"
+
+      - identifier: "execute_change"
+        unified_job_template:
+          name: "{{ change_playbook_template | default('Manual Approval Node') }}"
+          type: job_template
+        # This can be a job template reference or an approval node.
+        # For manual changes, use an Approval Node in AWX UI.
+        success_nodes:
+          - identifier: "post_validate"
+        failure_nodes:
+          - identifier: "post_validate"   # Still validate even on failure
+        always_nodes: []
+
+      - identifier: "post_validate"
+        unified_job_template:
+          name: "Network - Post-Validation & Report"
+          type: job_template
+        extra_data:
+          change_ticket: "{{ change_ticket }}"
+          fail_on_drift: "{{ fail_on_drift }}"
+          expected_changes: "{{ expected_changes_csv.split(',') | map('trim') | select | list if expected_changes_csv else [] }}"
+          report_format: "both"
+        success_nodes:
+          - identifier: "notify_success"
+        failure_nodes:
+          - identifier: "notify_failure"
+
+      - identifier: "pre_validate_failed"
+        unified_job_template:
+          name: "Send Notification"
+          type: job_template
+        extra_data:
+          notification_message: "PRE-VALIDATION FAILED for {{ change_ticket }}. Change aborted."
+          notification_severity: "critical"
+
+      - identifier: "notify_success"
+        unified_job_template:
+          name: "Send Notification"
+          type: job_template
+        extra_data:
+          notification_message: "Change {{ change_ticket }} validated successfully. Report available."
+          notification_severity: "info"
+
+      - identifier: "notify_failure"
+        unified_job_template:
+          name: "Send Notification"
+          type: job_template
+        extra_data:
+          notification_message: "POST-VALIDATION DRIFT DETECTED for {{ change_ticket }}. Review required."
+          notification_severity: "warning"
+
+# -- Step 3: AWX Credential Types (custom for ACI & NSX) --------------------
+
+credential_types:
+
+  - name: "Cisco ACI APIC"
+    description: "Credentials for Cisco ACI APIC REST API"
+    kind: net
+    inputs:
+      fields:
+        - id: aci_username
+          label: "APIC Username"
+          type: string
+        - id: aci_password
+          label: "APIC Password"
+          type: string
+          secret: true
+        - id: aci_hostname
+          label: "APIC Hostname"
+          type: string
+      required:
+        - aci_username
+        - aci_password
+        - aci_hostname
+    injectors:
+      extra_vars:
+        aci_username: "{{ '{{' }} aci_username {{ '}}' }}"
+        aci_password: "{{ '{{' }} aci_password {{ '}}' }}"
+        aci_hostname: "{{ '{{' }} aci_hostname {{ '}}' }}"
+
+  - name: "VMware NSX-T Manager"
+    description: "Credentials for NSX-T Manager REST API"
+    kind: net
+    inputs:
+      fields:
+        - id: nsx_username
+          label: "NSX Username"
+          type: string
+        - id: nsx_password
+          label: "NSX Password"
+          type: string
+          secret: true
+        - id: nsx_hostname
+          label: "NSX Manager Hostname"
+          type: string
+      required:
+        - nsx_username
+        - nsx_password
+        - nsx_hostname
+    injectors:
+      extra_vars:
+        nsx_username: "{{ '{{' }} nsx_username {{ '}}' }}"
+        nsx_password: "{{ '{{' }} nsx_password {{ '}}' }}"
+        nsx_hostname: "{{ '{{' }} nsx_hostname {{ '}}' }}"

@@ -1,0 +1,8 @@
+---
+validation_phase: "pre"
+snapshot_dir: "{{ validation_output_dir }}/snapshots"
+
+# Validation mode: "standard" or "avd"
+# - standard: raw show commands + Ansible resource modules
+# - avd: show commands + AVD eos_validate_state (ANTA-based)
+arista_validation_mode: "standard"

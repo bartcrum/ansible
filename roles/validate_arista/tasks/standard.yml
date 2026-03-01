@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# validate_arista — STANDARD mode (raw show commands + resource modules)
+# Use this when NOT using AVD for Arista fabric management.
+# =============================================================================
+
+- name: "Arista {{ validation_phase }} — Collect show commands"
+  arista.eos.eos_command:
+    commands:
+      - "{{ item.command }}"
+  register: arista_cmd_results
+  loop: "{{ arista_validation_commands }}"
+  loop_control:
+    label: "{{ item.key }}"
+  retries: "{{ validation_retries | default(3) }}"
+  delay: "{{ validation_retry_delay | default(5) }}"
+  until: arista_cmd_results is not failed
+
+- name: "Arista {{ validation_phase }} — Build command snapshot dict"
+  ansible.builtin.set_fact:
+    arista_command_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for result in arista_cmd_results.results -%}
+        {%- set _ = snapshot.update({ result.item.key: result.stdout | default([]) | first | default('') }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+
+- name: "Arista {{ validation_phase }} — Collect structured facts (resource modules)"
+  arista.eos.eos_facts:
+    gather_subset:
+      - "!all"
+    gather_network_resources: "{{ arista_structured_checks | map(attribute='resource') | map('regex_replace', '^arista\\.eos\\.eos_', '') | list }}"
+  register: arista_structured_facts
+  ignore_errors: true
+
+- name: "Arista {{ validation_phase }} — Build structured snapshot"
+  ansible.builtin.set_fact:
+    arista_structured_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for check in arista_structured_checks -%}
+        {%- set resource_key = check.resource | regex_replace('^arista\.eos\.eos_', '') -%}
+        {%- set _ = snapshot.update({
+          check.key: arista_structured_facts.ansible_facts.ansible_network_resources[resource_key] | default({})
+        }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+  when: arista_structured_facts is succeeded
+
+- name: "Arista {{ validation_phase }} — Merge and write snapshot"
+  ansible.builtin.copy:
+    content: "{{ (arista_command_snapshot | combine(arista_structured_snapshot | default({}))) | to_nice_json }}"
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost

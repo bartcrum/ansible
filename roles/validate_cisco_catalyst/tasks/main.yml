@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# validate_cisco_catalyst — Collect IOS/IOS-XE state for pre/post comparison
+# =============================================================================
+
+- name: "Catalyst {{ validation_phase }} — Collect show commands"
+  cisco.ios.ios_command:
+    commands:
+      - "{{ item.command }}"
+  register: catalyst_cmd_results
+  loop: "{{ catalyst_validation_commands }}"
+  loop_control:
+    label: "{{ item.key }}"
+  retries: "{{ validation_retries | default(3) }}"
+  delay: "{{ validation_retry_delay | default(5) }}"
+  until: catalyst_cmd_results is not failed
+
+- name: "Catalyst {{ validation_phase }} — Build command snapshot dict"
+  ansible.builtin.set_fact:
+    catalyst_command_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for result in catalyst_cmd_results.results -%}
+        {%- set _ = snapshot.update({ result.item.key: result.stdout | default([]) | first | default('') }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+
+- name: "Catalyst {{ validation_phase }} — Collect structured facts"
+  cisco.ios.ios_facts:
+    gather_subset:
+      - "!all"
+    gather_network_resources: "{{ catalyst_structured_checks | map(attribute='resource') | map('regex_replace', '^cisco\\.ios\\.ios_', '') | list }}"
+  register: catalyst_structured_facts
+  ignore_errors: true
+
+- name: "Catalyst {{ validation_phase }} — Build structured snapshot"
+  ansible.builtin.set_fact:
+    catalyst_structured_snapshot: >-
+      {%- set snapshot = {} -%}
+      {%- for check in catalyst_structured_checks -%}
+        {%- set resource_key = check.resource | regex_replace('^cisco\.ios\.ios_', '') -%}
+        {%- set _ = snapshot.update({
+          check.key: catalyst_structured_facts.ansible_facts.ansible_network_resources[resource_key] | default({})
+        }) -%}
+      {%- endfor -%}
+      {{ snapshot }}
+  when: catalyst_structured_facts is succeeded
+
+- name: "Catalyst {{ validation_phase }} — Merge and write snapshot"
+  ansible.builtin.copy:
+    content: "{{ (catalyst_command_snapshot | combine(catalyst_structured_snapshot | default({}))) | to_nice_json }}"
+    dest: "{{ snapshot_dir }}/{{ validation_phase }}_{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost

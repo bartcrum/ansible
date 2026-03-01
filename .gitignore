@@ -1,0 +1,33 @@
+# Ansible
+*.retry
+credentials.yml
+vault_password
+
+# Python
+*.py[co]
+__pycache__/
+.pytest_cache/
+.tox/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Validation output (generated at runtime)
+/output/
+/reports/
+
+# Environment files
+.env

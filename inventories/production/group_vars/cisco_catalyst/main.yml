@@ -1,0 +1,61 @@
+---
+# =============================================================================
+# Cisco Catalyst IOS / IOS-XE platform variables
+# =============================================================================
+ansible_network_os: cisco.ios.ios
+ansible_connection: ansible.netcommon.network_cli
+ansible_become: true
+ansible_become_method: enable
+
+# Validation commands to capture for pre/post comparison
+catalyst_validation_commands:
+  - command: "show version"
+    key: "version"
+    description: "Software version and uptime"
+  - command: "show interfaces status"
+    key: "interfaces_status"
+    description: "Interface operational state"
+  - command: "show ip interface brief"
+    key: "ip_interfaces"
+    description: "IP interface summary"
+  - command: "show ip route summary"
+    key: "route_summary"
+    description: "Routing table summary"
+  - command: "show ip bgp summary"
+    key: "bgp_summary"
+    description: "BGP peer state"
+  - command: "show ip ospf neighbor"
+    key: "ospf_neighbors"
+    description: "OSPF adjacency table"
+  - command: "show cdp neighbors"
+    key: "cdp_neighbors"
+    description: "CDP neighbor discovery"
+  - command: "show spanning-tree summary"
+    key: "stp_summary"
+    description: "Spanning-tree state"
+  - command: "show vlan brief"
+    key: "vlans"
+    description: "VLAN database"
+  - command: "show ip access-lists"
+    key: "acls"
+    description: "IP access-list entries (security audit)"
+  - command: "show logging"
+    key: "recent_logs"
+    description: "Syslog buffer"
+  - command: "show ntp associations"
+    key: "ntp"
+    description: "NTP peer associations"
+  - command: "show environment all"
+    key: "environment"
+    description: "Hardware health (power, fans, temp)"
+
+# Structured validation checks (parsed with resource modules)
+catalyst_structured_checks:
+  - resource: cisco.ios.ios_bgp_global
+    key: "bgp_config"
+  - resource: cisco.ios.ios_interfaces
+    key: "interfaces_config"
+  - resource: cisco.ios.ios_l3_interfaces
+    key: "l3_interfaces"
+  - resource: cisco.ios.ios_acls
+    key: "acl_config"

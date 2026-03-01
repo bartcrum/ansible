@@ -1,0 +1,46 @@
+---
+# =============================================================================
+# EXAMPLE — AVD fabric deploy as change playbook
+# =============================================================================
+# This shows how an AVD deploy integrates with the validation workflow.
+# The workflow wraps this playbook with pre/post snapshots automatically.
+#
+# Typical AVD flow:
+#   1. Engineer updates AVD group_vars (adds VLAN, new tenant, etc.)
+#   2. Runs eos_designs + eos_cli_config_gen to regenerate intended configs
+#   3. This playbook deploys the new configs via eos_config_deploy_eapi
+#
+# Integration with validation workflow:
+#   ansible-playbook playbooks/full_validation_workflow.yml \
+#     -i inventories/production/hosts.yml \
+#     -e change_ticket=CHG0012345 \
+#     -e change_playbook=playbooks/examples/avd_deploy_leaf.yml \
+#     -e change_manifest=playbooks/examples/avd_deploy_leaf_manifest.yml \
+#     --limit leaf-*
+#
+# Or in AWX, set change_playbook and change_manifest in extra_vars.
+# =============================================================================
+
+# --- Step 1: Build configs from AVD structured data ---
+- name: "AVD — Generate intended configurations"
+  hosts: arista
+  gather_facts: false
+  tasks:
+
+    - name: "Run eos_designs to build structured configs"
+      ansible.builtin.include_role:
+        name: arista.avd.eos_designs
+
+    - name: "Run eos_cli_config_gen to generate EOS configs"
+      ansible.builtin.include_role:
+        name: arista.avd.eos_cli_config_gen
+
+# --- Step 2: Deploy configs via eAPI ---
+- name: "AVD — Deploy configurations"
+  hosts: arista
+  gather_facts: false
+  tasks:
+
+    - name: "Deploy intended config via eAPI"
+      ansible.builtin.include_role:
+        name: arista.avd.eos_config_deploy_eapi

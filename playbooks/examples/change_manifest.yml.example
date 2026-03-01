@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# Change Manifest — Declares WHAT a change expects to affect
+# =============================================================================
+# Every change playbook should include a manifest file that tells the
+# validation framework which checks are expected to change, on which hosts.
+#
+# This file is an EXAMPLE. Copy it alongside your change playbook and
+# customize it for the specific change you are making.
+#
+# The validation framework loads this automatically when you pass:
+#   -e change_manifest=path/to/manifest.yml
+# or when your change playbook sets the 'change_manifest_data' fact.
+# =============================================================================
+
+# Human-readable description for the audit report
+change_description: "Add VLAN 450 for new application tier on DC leaf switches"
+
+# What platform groups does this change touch?
+# Each group lists the snapshot keys that are EXPECTED to change.
+# Anything that changes outside this list triggers a drift alert.
+change_scope:
+
+  arista:
+    hosts: "leaf-*"                     # Limit to matching hosts (glob pattern)
+    expected_changes:
+      - vlans                           # VLAN database will change
+      - interfaces_status               # Trunk ports will show new VLAN
+    must_not_change:                     # Optional — hard-fail if these move
+      - bgp_summary
+      - ospf_neighbors
+      - mlag
+
+  cisco_catalyst:
+    hosts: "all"                        # All Catalyst hosts in inventory
+    expected_changes: []                 # We do NOT expect Catalyst to change
+    must_not_change:
+      - bgp_summary
+      - ospf_neighbors
+
+  cisco_aci:
+    hosts: "all"
+    expected_changes:
+      - epg_summary                     # New EPG will appear
+      - bridge_domain_summary           # New BD for VLAN 450
+    must_not_change:
+      - fabric_health                   # Fabric health should stay stable
+
+  nsx:
+    hosts: "all"
+    expected_changes: []                # NSX should not be affected
+    # No must_not_change — NSX is read-only/informational
+
+# Global checks — applied to ALL hosts regardless of group
+global_must_not_change:
+  - ntp                                 # NTP should never drift during a change
+  - version                             # Software version should not change

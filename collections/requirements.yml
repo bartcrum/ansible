@@ -1,0 +1,19 @@
+---
+# =============================================================================
+# Required Ansible Collections
+# =============================================================================
+# Install with: ansible-galaxy collection install -r collections/requirements.yml
+# =============================================================================
+collections:
+  - name: ansible.netcommon
+    version: ">=5.0.0"
+  - name: arista.eos
+    version: ">=6.0.0"
+  - name: cisco.ios
+    version: ">=5.0.0"
+  - name: cisco.aci
+    version: ">=2.7.0"
+  - name: arista.avd
+    version: ">=5.0.0"
+  - name: awx.awx
+    version: ">=22.0.0"
